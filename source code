@@ -1,0 +1,318 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+
+#define SIZE 8
+
+char board[SIZE][SIZE];
+
+typedef struct {
+    int row, col;
+} Pos;
+
+Pos whiteKing, blackKing;
+
+// --- Helper Functions ---
+
+// Initialize board
+void initBoard() {
+    char init[8][9] = {
+        "rnbqkbnr",
+        "pppppppp",
+        "........",
+        "........",
+        "........",
+        "........",
+        "PPPPPPPP",
+        "RNBQKBNR"
+    };
+    for (int i = 0; i < SIZE; i++) {
+        for (int j = 0; j < SIZE; j++) {
+            board[i][j] = init[i][j];
+            if (board[i][j] == 'K') { whiteKing.row = i; whiteKing.col = j; }
+            if (board[i][j] == 'k') { blackKing.row = i; blackKing.col = j; }
+        }
+    }
+}
+
+// Print board
+void printBoard() {
+    printf("\n    a   b   c   d   e   f   g   h\n");
+    printf("  +---+---+---+---+---+---+---+---+\n");
+    for (int i = 0; i < SIZE; i++) {
+        printf("%d |", 8 - i);
+        for (int j = 0; j < SIZE; j++) {
+            printf(" %c |", board[i][j]);
+        }
+        printf(" %d\n", 8 - i);
+        printf("  +---+---+---+---+---+---+---+---+\n");
+    }
+    printf("    a   b   c   d   e   f   g   h\n");
+}
+
+int parsePos(const char *input, int *r, int *c) {
+    if (strlen(input) != 2) return 0;
+    *c = tolower(input[0]) - 'a';
+    *r = 8 - (input[1] - '0');
+    if (*r < 0 || *r >= SIZE || *c < 0 || *c >= SIZE) return 0;
+    return 1;
+}
+
+int isWhite(char p) { return (p >= 'A' && p <= 'Z'); }
+int isBlack(char p) { return (p >= 'a' && p <= 'z'); }
+
+// Check if path between (r1,c1) and (r2,c2) is clear
+int pathClear(int r1, int c1, int r2, int c2) {
+    int dr = (r2 > r1) ? 1 : (r2 < r1 ? -1 : 0);
+    int dc = (c2 > c1) ? 1 : (c2 < c1 ? -1 : 0);
+    r1 += dr; c1 += dc;
+    while (r1 != r2 || c1 != c2) {
+        if (board[r1][c1] != '.') return 0;
+        r1 += dr; c1 += dc;
+    }
+    return 1;
+}
+
+// --- Core Game Logic ---
+
+// Validate a move (includes pawn logic and sliding checks)
+int validMove(int r1, int c1, int r2, int c2) {
+    char p = board[r1][c1];
+    char target = board[r2][c2];
+
+    if (p == '.') return 0;
+    int dr = r2 - r1, dc = c2 - c1;
+
+    // FIX 1: Block self-capture for ALL pieces
+    if (target != '.') {
+        if (isWhite(p) && isWhite(target)) return 0; 
+        if (isBlack(p) && isBlack(target)) return 0; 
+    }
+
+    if (p == 'P') { // White pawn
+        if (dc == 0 && dr == -1 && target == '.') return 1;
+        if (dc == 0 && dr == -2 && r1 == 6 && target == '.' && board[r1-1][c1] == '.') return 1;
+        if (abs(dc) == 1 && dr == -1 && isBlack(target)) return 1;
+    }
+    if (p == 'p') { // Black pawn
+        if (dc == 0 && dr == 1 && target == '.') return 1;
+        if (dc == 0 && dr == 2 && r1 == 1 && target == '.' && board[r1+1][c1] == '.') return 1;
+        if (abs(dc) == 1 && dr == 1 && isWhite(target)) return 1;
+    }
+
+    if (tolower(p) == 'r') {
+        if (dr == 0 || dc == 0) return pathClear(r1, c1, r2, c2);
+    }
+    if (tolower(p) == 'b') {
+        if (abs(dr) == abs(dc)) return pathClear(r1, c1, r2, c2);
+    }
+    if (tolower(p) == 'q') {
+        if (dr == 0 || dc == 0 || abs(dr) == abs(dc)) return pathClear(r1, c1, r2, c2);
+    }
+    if (tolower(p) == 'n') {
+        if ((abs(dr) == 2 && abs(dc) == 1) || (abs(dr) == 1 && abs(dc) == 2)) return 1;
+    }
+    if (tolower(p) == 'k') {
+        if (abs(dr) <= 1 && abs(dc) <= 1) return 1;
+    }
+    return 0;
+}
+
+// Check if a square is attacked
+int squareUnderAttack(int r2, int c2, int byWhite) {
+    for (int r1 = 0; r1 < SIZE; r1++) {
+        for (int c1 = 0; c1 < SIZE; c1++) {
+            char p = board[r1][c1];
+            if (p == '.') continue;
+            
+            // Check based on the color that is ATTACKING
+            if (byWhite && isWhite(p)) {
+                // Special case: Pawns attack diagonally (they don't use validMove for simple attack)
+                if (p == 'P' && r1 - 1 == r2 && abs(c1 - c2) == 1) return 1;
+                // For all other pieces, check the move validity (which handles captures/moves)
+                if (p != 'P' && validMove(r1, c1, r2, c2)) return 1; 
+            }
+            if (!byWhite && isBlack(p)) {
+                 if (p == 'p' && r1 + 1 == r2 && abs(c1 - c2) == 1) return 1;
+                if (p != 'p' && validMove(r1, c1, r2, c2)) return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+void handlePromotion(int r, int c, int whiteTurn) {
+    char promotionChar;
+    printf("Promote pawn to (Q, R, B, N): ");
+    scanf(" %c", &promotionChar);
+    promotionChar = (whiteTurn) ? toupper(promotionChar) : tolower(promotionChar);
+    
+    // Basic validation, default to Queen if invalid
+    if (promotionChar != 'Q' && promotionChar != 'R' && promotionChar != 'B' && promotionChar != 'N' &&
+        promotionChar != 'q' && promotionChar != 'r' && promotionChar != 'b' && promotionChar != 'n') {
+        printf("Invalid choice. Promoting to Queen.\n");
+        promotionChar = whiteTurn ? 'Q' : 'q';
+    }
+    board[r][c] = promotionChar;
+}
+
+// Move a piece (checks for check on your own king)
+int movePiece(const char *from, const char *to, int whiteTurn) {
+    int r1, c1, r2, c2;
+    if (!parsePos(from, &r1, &c1) || !parsePos(to, &r2, &c2)) return 0;
+
+    char p = board[r1][c1];
+    if (p == '.') return 0;
+    if (whiteTurn && !isWhite(p)) return 0;
+    if (!whiteTurn && !isBlack(p)) return 0;
+    if (!validMove(r1, c1, r2, c2)) return 0;
+
+    char captured = board[r2][c2];
+    Pos oldKingW = whiteKing, oldKingB = blackKing; // Store old king positions for undo
+
+    // Make the move
+    board[r2][c2] = p;
+    board[r1][c1] = '.';
+
+    // Update King position tracking
+    if (p == 'K') { whiteKing.row = r2; whiteKing.col = c2; }
+    if (p == 'k') { blackKing.row = r2; blackKing.col = c2; }
+
+    int inCheck = 0;
+    if (whiteTurn && squareUnderAttack(whiteKing.row, whiteKing.col, 0)) inCheck = 1;
+    if (!whiteTurn && squareUnderAttack(blackKing.row, blackKing.col, 1)) inCheck = 1;
+
+    if (inCheck) {
+        // Undo the move and restore king positions
+        board[r1][c1] = p;
+        board[r2][c2] = captured;
+        whiteKing = oldKingW; 
+        blackKing = oldKingB;
+        return -1; // Illegal move! Your king would be in check.
+    }
+    
+    // Check for promotion after successful move
+    if (p == 'P' && r2 == 0) handlePromotion(r2, c2, 1);
+    if (p == 'p' && r2 == 7) handlePromotion(r2, c2, 0);
+
+    return 1;
+}
+
+// Checkmate logic
+int isCheckmate(int whiteTurn) {
+    Pos king = whiteTurn ? whiteKing : blackKing;
+    Pos oldKing = king; // Store original king position
+
+    // Check if currently in check
+    if (!squareUnderAttack(king.row, king.col, !whiteTurn))
+        return 0; // Not in check
+
+    // Try moving the king
+    for (int dr = -1; dr <= 1; dr++)
+        for (int dc = -1; dc <= 1; dc++) {
+            if (dr == 0 && dc == 0) continue;
+            int nr = king.row + dr, nc = king.col + dc;
+            if (nr < 0 || nr >= SIZE || nc < 0 || nc >= SIZE) continue;
+            
+            char temp = board[nr][nc];
+            char p = whiteTurn ? 'K' : 'k';
+
+            // Check if the move is allowed (non-pawn validMove handles king checks)
+            if (!validMove(king.row, king.col, nr, nc)) continue;
+            
+            // Make the trial move
+            board[nr][nc] = p;
+            board[king.row][king.col] = '.';
+
+            // FIX 2: Temporarily update global King position for squareUnderAttack check
+            if (whiteTurn) { whiteKing.row = nr; whiteKing.col = nc; }
+            else { blackKing.row = nr; blackKing.col = nc; }
+
+            int safe = !squareUnderAttack(nr, nc, !whiteTurn);
+
+            // Restore global King position and board state
+            if (whiteTurn) { whiteKing = oldKing; }
+            else { blackKing = oldKing; }
+            board[king.row][king.col] = p;
+            board[nr][nc] = temp;
+
+            if (safe) return 0; // King can move to safety
+        }
+
+    // Try any other piece (blocking or capturing)
+    // ... (This logic section was already correct and is kept as is) ...
+    for (int r1 = 0; r1 < SIZE; r1++) {
+        for (int c1 = 0; c1 < SIZE; c1++) {
+            char p = board[r1][c1];
+            if (p == '.') continue;
+            if (whiteTurn && !isWhite(p)) continue;
+            if (!whiteTurn && !isBlack(p)) continue;
+
+            for (int r2 = 0; r2 < SIZE; r2++) {
+                for (int c2 = 0; c2 < SIZE; c2++) {
+                    if (!validMove(r1, c1, r2, c2)) continue;
+
+                    char captured = board[r2][c2];
+                    
+                    // Store current king positions before trial move
+                    Pos oldKingW = whiteKing, oldKingB = blackKing; 
+                    
+                    // Make the move
+                    board[r2][c2] = p;
+                    board[r1][c1] = '.';
+
+                    if (p == 'K') { whiteKing.row = r2; whiteKing.col = c2; }
+                    if (p == 'k') { blackKing.row = r2; blackKing.col = c2; }
+
+                    int stillInCheck = (whiteTurn && squareUnderAttack(whiteKing.row, whiteKing.col, 0)) ||
+                                       (!whiteTurn && squareUnderAttack(blackKing.row, blackKing.col, 1));
+
+                    // Undo the move and restore king positions
+                    board[r1][c1] = p;
+                    board[r2][c2] = captured;
+                    whiteKing = oldKingW; 
+                    blackKing = oldKingB;
+
+                    if (!stillInCheck)
+                        return 0; // Found a move that removes check
+                }
+            }
+        }
+    }
+    return 1; // No move removes check → checkmate
+}
+
+int main() {
+    char from[10], to[10];
+    int whiteTurn = 1;
+    initBoard();
+
+    printf("=== Console Chess ===\n");
+    printf("Move like: e2 e4 | type 'exit' to quit.\n");
+
+    while (1) {
+        printBoard();
+        printf("%s's move: ", whiteTurn ? "White" : "Black");
+        if (scanf("%s", from) != 1) break;
+        if (strcmp(from, "exit") == 0) break;
+        if (scanf("%s", to) != 1) break;
+
+        int result = movePiece(from, to, whiteTurn);
+        if (result == 1) {
+            if (isCheckmate(!whiteTurn)) {
+                printBoard();
+                printf("Checkmate! %s wins!\n", whiteTurn ? "White" : "Black");
+                break;
+            }
+            whiteTurn = !whiteTurn;
+        } else if (result == -1) {
+            printf("Illegal move! Your king would be in check.\n");
+        } else {
+            printf("Invalid move or position! Try again.\n");
+        }
+    }
+
+    printf("Game over.\n");
+    return 0;
+}
